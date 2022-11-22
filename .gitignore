@@ -1,0 +1,4 @@
+**/obj/**
+*.cue
+*.bin
+output/slimhawk
