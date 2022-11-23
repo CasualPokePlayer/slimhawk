@@ -1,4 +1,5 @@
 **/obj/**
 *.cue
 *.bin
+*.avi
 output/slimhawk

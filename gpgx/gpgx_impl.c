@@ -222,7 +222,7 @@ core_t* gpgx_impl_create(void) {
 	impl->api = gpgx_api_create(impl->wbx);
 	return &impl->core;
 }
-
+/*
 #define DRIFT_ADDR 0x6FFA
 #define BAD_DRIFT 0xA0
 
@@ -383,6 +383,57 @@ int main(int argc, char* argv[]) {
 
 	wbx_impl_exit(impl->wbx);
 	gpgx_impl_destroy(&impl->core);
+
+	return 0;
+}
+*/
+
+#include "file.h"
+#include "encoding_impl.h"
+#include <time.h>
+
+int main(int argc, char* argv[]) {
+	gpgx_impl_t* impl = (gpgx_impl_t*)core_parse_cli(argc, argv);
+	wbx_impl_enter(impl->wbx);
+
+	uint8_t* movie_buffer = NULL;
+	size_t movie_len = read_entire_file("movie_out.bin", &movie_buffer);
+	if (movie_len != 171285255) {
+		FATAL_ERROR("Wrong movie len (expected 171285255, got %ld", movie_len);
+	}
+
+	gpgx_api_input_data_t input;
+	if (!impl->api->gpgx_get_control(&input, sizeof(gpgx_api_input_data_t))) {
+		FATAL_ERROR("Interop error in gpgx_get_control");
+	}
+
+	int32_t fps_num, fps_den;
+	impl->api->gpgx_get_fps(&fps_num, &fps_den);
+
+	encoding_impl_t* encoder = encoding_impl_create("test.avi", "avi", "ffv1", 0, 320, 224, fps_num, fps_den, 1024);
+	uint32_t* video_buffer;
+	int32_t pitch;
+	impl->api->gpgx_get_video(NULL, NULL, &pitch, &video_buffer);
+	int16_t* audio_buffer;
+	impl->api->gpgx_get_audio(NULL, &audio_buffer);
+	int32_t num_samples;
+
+	clock_t start = clock();
+	_Pragma("GCC unroll 8") for (uint32_t i = 0; i < 15000; i++) {
+		input.pad[0] = movie_buffer[i];
+		impl->api->gpgx_put_control(&input, sizeof(gpgx_api_input_data_t));
+		impl->api->gpgx_advance();
+		impl->api->gpgx_get_audio(&num_samples, NULL);
+		encoding_impl_push_frame(encoder, video_buffer, pitch, audio_buffer, num_samples); 
+	}
+	encoding_impl_destroy(encoder);
+	clock_t end = clock();
+	double time_elapsed = (end - start) / (double)CLOCKS_PER_SEC;
+	printf("ran 15000 frames in %f seconds, averaging %f fps\n", time_elapsed, 15000 / time_elapsed);
+
+	wbx_impl_exit(impl->wbx);
+	gpgx_impl_destroy(&impl->core);
+	free(movie_buffer);
 
 	return 0;
 }

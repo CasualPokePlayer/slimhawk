@@ -6,8 +6,8 @@ OBJ_DIR := $(OUT_DIR)/release
 DOBJ_DIR := $(OUT_DIR)/debug
 
 CC := gcc
-CCFLAGS := -I$(ROOT_DIR)/common -I$(ROOT_DIR)/core -I$(ROOT_DIR)/disc -I$(ROOT_DIR)/gpgx -I$(ROOT_DIR)/wbx \
-	-Wall -Wextra -std=c99 -fno-strict-aliasing
+CCFLAGS := -I$(ROOT_DIR)/common -I$(ROOT_DIR)/core -I$(ROOT_DIR)/disc -I$(ROOT_DIR)/encoding -I$(ROOT_DIR)/gpgx -I$(ROOT_DIR)/wbx \
+	-Wall -Wextra -std=c11 -fno-strict-aliasing
 
 TARGET := slimhawk
 
@@ -18,11 +18,12 @@ SRCS := \
 	$(ROOT_DIR)/disc/disc_impl.c \
 	$(ROOT_DIR)/gpgx/gpgx_api.c \
 	$(ROOT_DIR)/gpgx/gpgx_impl.c \
+	$(ROOT_DIR)/encoding/encoding_impl.c \
 	$(ROOT_DIR)/wbx/wbx_api.c \
 	$(ROOT_DIR)/wbx/wbx_impl.c
 
-LIBS := -L $(OUTPUT_DIR) -lwaterboxhost -lmednadisc
-LDFLAGS := -Wl,-R.
+LIBS := -L $(OUTPUT_DIR) -lwaterboxhost -lmednadisc -lavcodec -lavformat -lavutil
+LDFLAGS := -Wl,-R. -pthread
 CCFLAGS_DEBUG := -O0 -g
 CCFLAGS_RELEASE := -O3 -flto
 CXXFLAGS_DEBUG := -O0 -g
