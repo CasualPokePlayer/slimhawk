@@ -392,6 +392,10 @@ int main(int argc, char* argv[]) {
 #include "encoding_impl.h"
 #include <time.h>
 
+#define VIDEO_CHUNK_LEN 2588602
+#define VIDEO_NUM 0
+#define NEXT_VIDEO_NUM 1
+
 int main(int argc, char* argv[]) {
 	gpgx_impl_t* impl = (gpgx_impl_t*)core_parse_cli(argc, argv);
 	wbx_impl_enter(impl->wbx);
@@ -410,7 +414,7 @@ int main(int argc, char* argv[]) {
 	int32_t fps_num, fps_den;
 	impl->api->gpgx_get_fps(&fps_num, &fps_den);
 
-	encoding_impl_t* encoder = encoding_impl_create("test.avi", "avi", "ffv1", 0, 320, 224, fps_num, fps_den, 1024);
+	encoding_impl_t* encoder = encoding_impl_create("desert_bus_0.avi", "avi", "h264", 1024 * 12, 320, 224, fps_num, fps_den, 1024);
 	uint32_t* video_buffer;
 	int32_t pitch;
 	impl->api->gpgx_get_video(NULL, NULL, &pitch, &video_buffer);
@@ -418,18 +422,36 @@ int main(int argc, char* argv[]) {
 	impl->api->gpgx_get_audio(NULL, &audio_buffer);
 	int32_t num_samples;
 
-	clock_t start = clock();
-	_Pragma("GCC unroll 8") for (uint32_t i = 0; i < 15000; i++) {
+	FILE* state_file = fopen("state_0.bin", "rb");
+	void* state;
+	uintptr_t state_len;
+	
+	if (state_file) {
+		fseek(state_file, 0, SEEK_END);
+		state_len = ftell(state_file);
+		state = salloc(state_len);
+		fseek(state_file, 0, SEEK_SET);
+		fread(state, 1, state_len, state_file);
+		wbx_impl_load_state(impl->wbx, state, state_len);
+		fclose(state_file);
+		free(state);
+	}
+
+	_Pragma("GCC unroll 8") for (uint32_t i = (VIDEO_NUM * VIDEO_CHUNK_LEN); i < (NEXT_VIDEO_NUM * VIDEO_CHUNK_LEN); i++) {
 		input.pad[0] = movie_buffer[i];
 		impl->api->gpgx_put_control(&input, sizeof(gpgx_api_input_data_t));
 		impl->api->gpgx_advance();
 		impl->api->gpgx_get_audio(&num_samples, NULL);
 		encoding_impl_push_frame(encoder, video_buffer, pitch, audio_buffer, num_samples); 
 	}
+
 	encoding_impl_destroy(encoder);
-	clock_t end = clock();
-	double time_elapsed = (end - start) / (double)CLOCKS_PER_SEC;
-	printf("ran 15000 frames in %f seconds, averaging %f fps\n", time_elapsed, 15000 / time_elapsed);
+
+	state_file = fopen("state_1.bin", "wb");
+	state = wbx_impl_save_state(impl->wbx, &state_len);
+	fwrite(state, 1, state_len, state_file);
+	fclose(state_file);
+	free(state);
 
 	wbx_impl_exit(impl->wbx);
 	gpgx_impl_destroy(&impl->core);

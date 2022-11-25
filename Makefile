@@ -22,7 +22,7 @@ SRCS := \
 	$(ROOT_DIR)/wbx/wbx_api.c \
 	$(ROOT_DIR)/wbx/wbx_impl.c
 
-LIBS := -L $(OUTPUT_DIR) -lwaterboxhost -lmednadisc -lavcodec -lavformat -lavutil
+LIBS := -L $(OUTPUT_DIR) -lwaterboxhost -lmednadisc -lavcodec -lavformat -lavutil -lswscale
 LDFLAGS := -Wl,-R. -pthread
 CCFLAGS_DEBUG := -O0 -g
 CCFLAGS_RELEASE := -O3 -flto

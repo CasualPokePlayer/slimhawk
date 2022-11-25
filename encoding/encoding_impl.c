@@ -1,6 +1,7 @@
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/opt.h>
+#include <libswscale/swscale.h>
 
 #include <stdbool.h>
 #include <stdatomic.h>
@@ -19,18 +20,16 @@
 } while (0)
 
 static const struct timespec encoding_impl_sleep_dur = { .tv_sec = 0, .tv_nsec = 5000000 }; // 5ms
+static const AVRational encoding_impl_audio_rate = { .num = 1, .den = 44100 };
 
 typedef struct {
 	AVStream* stream;
 	AVCodecContext* codec;
-	AVFrame* frame;
 } encoding_impl_av_t;
 
 typedef struct {
-	void* video;
-	void* audio;
-	uint32_t num_samples;
-	uint64_t abs_sample_ts;
+	AVFrame* video;
+	AVFrame* audio;
 	atomic_bool active;
 	mtx_t lock;
 } encoding_impl_av_frame_t;
@@ -38,6 +37,8 @@ typedef struct {
 struct encoding_impl_t {
 	AVFormatContext* output_format;
 	AVPacket* packet;
+	AVFrame* prescaled_frame;
+	struct SwsContext* sws;
 	encoding_impl_av_t video;
 	encoding_impl_av_t audio;
 	encoding_impl_av_frame_t* frames;
@@ -120,9 +121,6 @@ static int encoding_impl_worker_thread(void* arg) {
 	encoding_impl_t* impl = arg;
 	encoding_impl_av_frame_t* av_frame = impl->frames;
 	uint32_t pos = 0;
-	AVRational audio_rate;
-	audio_rate.num = 1;
-	audio_rate.den = 44100;
 	int err = 0;
 
 	while (!atomic_load_explicit(&impl->exit, memory_order_relaxed)) {
@@ -133,25 +131,14 @@ static int encoding_impl_worker_thread(void* arg) {
 
 		mtx_lock(&av_frame->lock);
 
-		impl->video.frame->pts = av_rescale_q(av_frame->abs_sample_ts, audio_rate, impl->video.codec->time_base);
-		impl->video.frame->data[0] = av_frame->video;
-		impl->video.frame->linesize[0] = impl->width * sizeof(uint32_t);
-		impl->video.frame->format = AV_PIX_FMT_BGR0;
-		impl->video.frame->width = impl->width;
-		impl->video.frame->height = impl->height;		
-
-		err = avcodec_send_frame(impl->video.codec, impl->video.frame);
+		err = avcodec_send_frame(impl->video.codec, av_frame->video);
 		if (err) {
 			FATAL_AV_ERROR("Error while encoding video", err);
 		}
 
 		encoding_impl_process_packets(impl->output_format, impl->packet, &impl->video);
 
-		impl->audio.frame->pts = av_frame->abs_sample_ts;
-		impl->audio.frame->data[0] = av_frame->audio;
-		impl->audio.frame->nb_samples = av_frame->num_samples;
-
-		err = avcodec_send_frame(impl->audio.codec, impl->audio.frame);
+		err = avcodec_send_frame(impl->audio.codec, av_frame->audio);
 		if (err) {
 			FATAL_AV_ERROR("Error while encoding audio", err);
 		}
@@ -207,22 +194,38 @@ encoding_impl_t* encoding_impl_create(const char* path, const char* extension, c
 		impl->video.codec->codec_tag = MKTAG('X', 'V', 'I', 'D');
 	}
 
-	int num, den;
-	av_reduce(&num, &den, fps_den, fps_num, INT_MAX);
+	AVRational video_timebase;
+	av_reduce(&video_timebase.num, &video_timebase.den, fps_den, fps_num, INT_MAX);
 
 	impl->video.codec->codec_type = AVMEDIA_TYPE_VIDEO;
 	impl->video.codec->bit_rate = bitrate_kbps;
-	impl->video.codec->width = width;
-	impl->video.codec->height = height;
+	impl->video.codec->width = width * 4;
+	impl->video.codec->height = height * 4;
 
-	impl->video.codec->time_base.num = num;
-	impl->video.codec->time_base.den = den;
-	impl->video.codec->gop_size = 1;
-	impl->video.codec->level = 1;
-	impl->video.codec->pix_fmt = AV_PIX_FMT_BGR0;
+	impl->video.codec->time_base = video_timebase;
+	impl->video.codec->gop_size = 30;
+	impl->video.codec->level = 0;
+	impl->video.codec->thread_type = FF_THREAD_SLICE;
 
-	if (impl->video.codec->codec_id == AV_CODEC_ID_UTVIDEO) {
-		av_opt_set_int(impl->video.codec->priv_data, "pred", 3, 0);
+	switch (impl->video.codec->codec_id) {
+		case AV_CODEC_ID_FFV1:
+			impl->video.codec->pix_fmt = AV_PIX_FMT_BGR0;
+			break;
+		case AV_CODEC_ID_UTVIDEO:
+			impl->video.codec->pix_fmt = AV_PIX_FMT_GBRP;
+			av_opt_set_int(impl->video.codec->priv_data, "pred", 3, 0);
+			break;
+		default:
+			impl->video.codec->pix_fmt = AV_PIX_FMT_YUV420P;
+			break;
+	}
+
+	impl->prescaled_frame = av_frame_alloc();
+
+	impl->sws = sws_getCachedContext(NULL, width, height, AV_PIX_FMT_BGR0,
+		width * 4, height * 4, impl->video.codec->pix_fmt, SWS_POINT, NULL, NULL, NULL);
+	if (!impl->sws) {
+		FATAL_ERROR("Failed to allocate sws context");
 	}
 
 	if (output_format->flags & AVFMT_GLOBALHEADER) {
@@ -244,8 +247,7 @@ encoding_impl_t* encoding_impl_create(const char* path, const char* extension, c
 	}
 
 	impl->audio.codec->codec_type = AVMEDIA_TYPE_AUDIO;
-	impl->audio.codec->time_base.num = 1;
-	impl->audio.codec->time_base.den = 44100;
+	impl->audio.codec->time_base = encoding_impl_audio_rate;
 	impl->audio.codec->sample_rate = 44100;
 	impl->audio.codec->sample_fmt = AV_SAMPLE_FMT_S16;
 	impl->audio.codec->level = 1;
@@ -258,26 +260,6 @@ encoding_impl_t* encoding_impl_create(const char* path, const char* extension, c
 
 	if (avcodec_open2(impl->audio.codec, audio_codec, NULL) < 0) {
 		FATAL_ERROR("Failed to open audio codec");
-	}
-
-	impl->video.frame = av_frame_alloc();
-
-	impl->video.frame->format = AV_PIX_FMT_BGR0;
-	impl->video.frame->width = width;
-	impl->video.frame->height = height;
-
-	if (av_frame_get_buffer(impl->video.frame, 1)) {
-		FATAL_ERROR("Failed to allocate video frame");
-	}
-
-	impl->audio.frame = av_frame_alloc();
-
-	impl->audio.frame->format = AV_SAMPLE_FMT_S16;
-	impl->audio.frame->nb_samples = MAX_SAMPLES;
-	impl->audio.frame->channel_layout = AV_CH_LAYOUT_STEREO;
-
-	if (av_frame_get_buffer(impl->audio.frame, 1)) {
-		FATAL_ERROR("Failed to allocate audio frame");
 	}
 
 	impl->video.stream = avformat_new_stream(impl->output_format, video_codec);
@@ -324,9 +306,27 @@ encoding_impl_t* encoding_impl_create(const char* path, const char* extension, c
 	impl->frames = zalloc(sizeof(encoding_impl_av_frame_t) * frames_to_buffer);
 	impl->num_frames = frames_to_buffer;
 	for (uint32_t i = 0; i < frames_to_buffer; i++) {
-		impl->frames[i].video = salloc(width * height * sizeof(uint32_t));
-		impl->frames[i].audio = salloc(MAX_SAMPLES * 2 * sizeof(int16_t));
-		mtx_init(&impl->frames[i].lock, mtx_plain);
+		encoding_impl_av_frame_t* av_frame = &impl->frames[i];
+
+		av_frame->video = av_frame_alloc();
+		av_frame->video->format = impl->video.codec->pix_fmt;
+		av_frame->video->width = width * 4;
+		av_frame->video->height = height * 4;
+
+		if (av_frame_get_buffer(av_frame->video, sizeof(uint32_t))) {
+			FATAL_ERROR("Failed to allocate video frame");
+		}
+
+		av_frame->audio = av_frame_alloc();
+		av_frame->audio->format = AV_SAMPLE_FMT_S16;
+		av_frame->audio->nb_samples = MAX_SAMPLES;
+		av_frame->audio->channel_layout = AV_CH_LAYOUT_STEREO;
+
+		if (av_frame_get_buffer(av_frame->audio, sizeof(int16_t))) {
+			FATAL_ERROR("Failed to allocate audio frame");
+		}
+
+		mtx_init(&av_frame->lock, mtx_plain);
 	}
 
 	thrd_create(&impl->worker, encoding_impl_worker_thread, impl);
@@ -340,8 +340,8 @@ void encoding_impl_destroy(encoding_impl_t* impl) {
 			thrd_sleep(&encoding_impl_sleep_dur, NULL);
 		}
 		mtx_lock(&av_frame->lock);
-		free(av_frame->video);
-		free(av_frame->audio);
+		av_frame_free(&av_frame->video);
+		av_frame_free(&av_frame->audio);
 		mtx_unlock(&av_frame->lock);
 		mtx_destroy(&av_frame->lock);
 	}
@@ -358,10 +358,10 @@ void encoding_impl_destroy(encoding_impl_t* impl) {
 	avio_closep(&impl->output_format->pb);
 	avformat_free_context(impl->output_format);
 	av_packet_free(&impl->packet);
+	av_frame_free(&impl->prescaled_frame);
+	sws_freeContext(impl->sws);
 	avcodec_free_context(&impl->video.codec);
-	av_frame_free(&impl->video.frame);
 	avcodec_free_context(&impl->audio.codec);
-	av_frame_free(&impl->audio.frame);
 	free(impl->frames);
 	free(impl);
 }
@@ -379,18 +379,16 @@ void encoding_impl_push_frame(encoding_impl_t* impl, void* video, uint32_t pitch
 
 	mtx_lock(&av_frame->lock);
 
-	uint8_t* vps = video;
-	uint32_t* vpd = av_frame->video;
-	for (uint32_t i = 0; i < impl->height; i++) {
-		memcpy(vpd, vps, impl->width * sizeof(uint32_t));
-		vps += pitch;
-		vpd += impl->width;
-	}
-	memcpy(av_frame->audio, audio, num_samples * 2 * sizeof(int16_t));
-	av_frame->num_samples = num_samples;
-	av_frame->abs_sample_ts = impl->abs_sample_ts;
-	atomic_store_explicit(&av_frame->active, true, memory_order_relaxed);
+	impl->prescaled_frame->data[0] = video;
+	impl->prescaled_frame->linesize[0] = pitch;
+	sws_scale(impl->sws, (void*)impl->prescaled_frame->data, impl->prescaled_frame->linesize, 0, impl->height, av_frame->video->data, av_frame->video->linesize);
+	av_frame->video->pts = av_rescale_q(impl->abs_sample_ts, encoding_impl_audio_rate, impl->video.codec->time_base);
 
+	memcpy(av_frame->audio->data[0], audio, num_samples * 2 * sizeof(int16_t));
+	av_frame->audio->nb_samples = num_samples;
+	av_frame->audio->pts = impl->abs_sample_ts;
+
+	atomic_store_explicit(&av_frame->active, true, memory_order_relaxed);
 	mtx_unlock(&av_frame->lock);
 
 	impl->abs_sample_ts += num_samples;
