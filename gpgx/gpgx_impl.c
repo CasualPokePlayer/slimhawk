@@ -390,11 +390,12 @@ int main(int argc, char* argv[]) {
 
 #include "file.h"
 #include "encoding_impl.h"
-#include <time.h>
 
 #define VIDEO_CHUNK_LEN 2588602
-#define VIDEO_NUM 0
-#define NEXT_VIDEO_NUM 1
+#define VIDEO_NUM 1
+#define VIDEO_FILE "desert_bus_1.avi"
+#define CUR_STATE_FILE "state_1.bin"
+#define NEXT_STATE_FILE "state_2.bin"
 
 int main(int argc, char* argv[]) {
 	gpgx_impl_t* impl = (gpgx_impl_t*)core_parse_cli(argc, argv);
@@ -414,7 +415,7 @@ int main(int argc, char* argv[]) {
 	int32_t fps_num, fps_den;
 	impl->api->gpgx_get_fps(&fps_num, &fps_den);
 
-	encoding_impl_t* encoder = encoding_impl_create("desert_bus_0.avi", "avi", "h264", 1024 * 12, 320, 224, fps_num, fps_den, 1024);
+	encoding_impl_t* encoder = encoding_impl_create(VIDEO_FILE, "avi", "h264", 1024 * 12, 320, 224, fps_num, fps_den, 1024);
 	uint32_t* video_buffer;
 	int32_t pitch;
 	impl->api->gpgx_get_video(NULL, NULL, &pitch, &video_buffer);
@@ -422,22 +423,12 @@ int main(int argc, char* argv[]) {
 	impl->api->gpgx_get_audio(NULL, &audio_buffer);
 	int32_t num_samples;
 
-	FILE* state_file = fopen("state_0.bin", "rb");
-	void* state;
-	uintptr_t state_len;
-	
-	if (state_file) {
-		fseek(state_file, 0, SEEK_END);
-		state_len = ftell(state_file);
-		state = salloc(state_len);
-		fseek(state_file, 0, SEEK_SET);
-		fread(state, 1, state_len, state_file);
-		wbx_impl_load_state(impl->wbx, state, state_len);
-		fclose(state_file);
-		free(state);
-	}
+	void* state = NULL;
+	uintptr_t state_len = read_entire_file(CUR_STATE_FILE, &state);
+	wbx_impl_load_state(impl->wbx, state, state_len);
+	free(state);
 
-	_Pragma("GCC unroll 8") for (uint32_t i = (VIDEO_NUM * VIDEO_CHUNK_LEN); i < (NEXT_VIDEO_NUM * VIDEO_CHUNK_LEN); i++) {
+	_Pragma("GCC unroll 8") for (uint32_t i = (VIDEO_NUM * VIDEO_CHUNK_LEN); i < ((VIDEO_NUM + 1) * VIDEO_CHUNK_LEN); i++) {
 		input.pad[0] = movie_buffer[i];
 		impl->api->gpgx_put_control(&input, sizeof(gpgx_api_input_data_t));
 		impl->api->gpgx_advance();
@@ -447,7 +438,7 @@ int main(int argc, char* argv[]) {
 
 	encoding_impl_destroy(encoder);
 
-	state_file = fopen("state_1.bin", "wb");
+	FILE* state_file = fopen(NEXT_STATE_FILE, "wb");
 	state = wbx_impl_save_state(impl->wbx, &state_len);
 	fwrite(state, 1, state_len, state_file);
 	fclose(state_file);

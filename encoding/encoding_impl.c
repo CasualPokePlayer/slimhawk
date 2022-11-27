@@ -198,7 +198,7 @@ encoding_impl_t* encoding_impl_create(const char* path, const char* extension, c
 	av_reduce(&video_timebase.num, &video_timebase.den, fps_den, fps_num, INT_MAX);
 
 	impl->video.codec->codec_type = AVMEDIA_TYPE_VIDEO;
-	impl->video.codec->bit_rate = bitrate_kbps;
+	impl->video.codec->bit_rate = bitrate_kbps * 1024;
 	impl->video.codec->width = width * 4;
 	impl->video.codec->height = height * 4;
 
