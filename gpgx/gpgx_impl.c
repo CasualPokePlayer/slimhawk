@@ -1,5 +1,6 @@
 #include "alloc.h"
 #include "fatal_error.h"
+#include "stub.h"
 #include "gpgx_api.h"
 #include "core.h"
 
@@ -11,7 +12,9 @@ typedef struct {
 	disc_impl_t* disc;
 	gpgx_api_cd_data_t* toc;
 	core_file_t* firmware;
+	void* load_archive_cb_stub;
 	gpgx_api_load_archive_cb_t load_archive_cb;
+	void* cd_read_cb_stub;
 	gpgx_api_cd_read_cb_t cd_read_cb;
 	uint32_t* video_buffer;
 	uint32_t video_buffer_size;
@@ -19,36 +22,34 @@ typedef struct {
 	uint32_t audio_buffer_size;
 } gpgx_impl_t;
 
-// bleh
-static gpgx_impl_t* current_core;
-
-static int32_t gpgx_impl_load_archive_callback(const char* filename, void* buffer, uint32_t max_size) {
+static int32_t gpgx_impl_load_archive_callback(const char* filename, void* buffer, uint32_t max_size, void* userdata) {
 	if (!buffer) {
 		fprintf(stderr, "Could not satify firmware request for %s as buffer is NULL\n", filename);
 		return 0;
 	}
 
+	gpgx_impl_t* impl = (gpgx_impl_t*)userdata;
 	core_file_t src;
 
 	if (!strcmp(filename, "PRIMARY_ROM")) {
-		if (!current_core->rom) {
+		if (!impl->rom) {
 			fprintf(stderr, "Could not satify firmware request for PRIMARY_ROM as none was provided.\n");
 			return 0;
 		}
 
-		src.data = current_core->rom->data;
-		src.length = current_core->rom->length;
+		src.data = impl->rom->data;
+		src.length = impl->rom->length;
 	} else if (!strcmp(filename, "PRIMARY_CD") || !strcmp(filename, "SECONDARY_CD")) {
-		if (current_core->rom && !strcmp(filename, "PRIMARY_CD")) {
+		if (impl->rom && !strcmp(filename, "PRIMARY_CD")) {
 			fprintf(stderr, "Declined to satisfy firmware request PRIMARY_CD because PRIMARY_ROM was provided.\n");
 			return 0;
 		} else {
-			if (!current_core->disc) {
+			if (!impl->disc) {
 				fprintf(stderr, "Couldn't satisfy firmware request %s because none was provided.\n", filename);
 				return 0;
 			}
 
-			src.data = (uint8_t*)current_core->toc;
+			src.data = (uint8_t*)impl->toc;
 			src.length = sizeof(gpgx_api_cd_data_t);
 
 			if (src.length != max_size) {
@@ -62,13 +63,13 @@ static int32_t gpgx_impl_load_archive_callback(const char* filename, void* buffe
 			return 0;
 		}
 
-		if (!current_core->firmware) {
+		if (!impl->firmware) {
 			fprintf(stderr, "Frontend couldn't satisfy firmware request GEN:%s\n", filename);
 			return 0;
 		}
 
-		src.data = current_core->firmware->data;
-		src.length = current_core->firmware->length;
+		src.data = impl->firmware->data;
+		src.length = impl->firmware->length;
 	}
 
 	if (src.length > max_size) {
@@ -82,15 +83,16 @@ static int32_t gpgx_impl_load_archive_callback(const char* filename, void* buffe
 	return src.length;
 }
 
-static void gpgx_impl_cd_read_callback(int32_t lba, void* dst, bool audio) {
+static void gpgx_impl_cd_read_callback(int32_t lba, void* dst, bool audio, void* userdata) {
+	gpgx_impl_t* impl = (gpgx_impl_t*)userdata;
 	if (audio) {
-		if (lba < current_core->toc->end) {
-			disc_impl_read_lba_2352(current_core->disc, lba, dst);
+		if (lba < impl->toc->end) {
+			disc_impl_read_lba_2352(impl->disc, lba, dst);
 		} else {
 			memset(dst, 0, 2352);
 		}
 	} else {
-		disc_impl_read_lba_2048(current_core->disc, lba, dst);
+		disc_impl_read_lba_2048(impl->disc, lba, dst);
 	}
 }
 
@@ -98,12 +100,16 @@ static void gpgx_impl_init(core_t* core, core_files_t* files) {
 	gpgx_impl_t* impl = (gpgx_impl_t*)core;
 	wbx_impl_enter(impl->wbx);
 
-	// register callbacks
-	wbx_impl_register_callback(impl->wbx, gpgx_impl_load_archive_callback);
-	wbx_impl_register_callback(impl->wbx, gpgx_impl_cd_read_callback);
+	// create callback stubs
+	impl->load_archive_cb_stub = stub_create(gpgx_impl_load_archive_callback, impl, 3);
+	impl->cd_read_cb_stub = stub_create(gpgx_impl_cd_read_callback, impl, 3);
 
-	impl->load_archive_cb = wbx_impl_get_callback_addr(impl->wbx, gpgx_impl_load_archive_callback);
-	impl->cd_read_cb = wbx_impl_get_callback_addr(impl->wbx, gpgx_impl_cd_read_callback);
+	// register callbacks
+	wbx_impl_register_callback(impl->wbx, impl->load_archive_cb_stub);
+	wbx_impl_register_callback(impl->wbx, impl->cd_read_cb_stub);
+
+	impl->load_archive_cb = wbx_impl_get_callback_addr(impl->wbx, impl->load_archive_cb_stub);
+	impl->cd_read_cb = wbx_impl_get_callback_addr(impl->wbx, impl->cd_read_cb_stub);
 
 	// default settings more or less
 	gpgx_api_init_settings_t settings;
@@ -150,7 +156,6 @@ static void gpgx_impl_init(core_t* core, core_files_t* files) {
 		files->firmwares[0] = NULL;
 	}
 
-	current_core = impl; // bleh
 	if (!impl->api->gpgx_init("GEN", impl->load_archive_cb, &settings)) {
 		FATAL_ERROR("gpgx_init failed!");
 	}
@@ -171,10 +176,11 @@ static void gpgx_impl_destroy(core_t* core) {
 	}
 	free(impl->toc);
 	free(impl->firmware);
+	stub_destroy(impl->load_archive_cb_stub);
+	stub_destroy(impl->cd_read_cb_stub);
 	free(impl->video_buffer);
 	free(impl->audio_buffer);
 	free(impl);
-	current_core = NULL;
 }
 
 static void gpgx_impl_frame_advance(core_t* core, void* controller, bool render_video, bool render_sound) {
@@ -392,10 +398,9 @@ int main(int argc, char* argv[]) {
 #include "encoding_impl.h"
 
 #define VIDEO_CHUNK_LEN 2588602
-#define VIDEO_NUM 1
-#define VIDEO_FILE "desert_bus_1.avi"
-#define CUR_STATE_FILE "state_1.bin"
-#define NEXT_STATE_FILE "state_2.bin"
+#define VIDEO_NUM 2
+#define VIDEO_FILE "desert_bus_2.avi"
+#define STATE_FILE "state_2.bin"
 
 int main(int argc, char* argv[]) {
 	gpgx_impl_t* impl = (gpgx_impl_t*)core_parse_cli(argc, argv);
@@ -424,9 +429,11 @@ int main(int argc, char* argv[]) {
 	int32_t num_samples;
 
 	void* state = NULL;
-	uintptr_t state_len = read_entire_file(CUR_STATE_FILE, &state);
+	uintptr_t state_len = read_entire_file(STATE_FILE, &state);
 	wbx_impl_load_state(impl->wbx, state, state_len);
 	free(state);
+	impl->api->gpgx_set_cdd_callback(impl->cd_read_cb);
+	impl->api->gpgx_invalidate_pattern_cache();
 
 	_Pragma("GCC unroll 8") for (uint32_t i = (VIDEO_NUM * VIDEO_CHUNK_LEN); i < ((VIDEO_NUM + 1) * VIDEO_CHUNK_LEN); i++) {
 		input.pad[0] = movie_buffer[i];
@@ -437,12 +444,6 @@ int main(int argc, char* argv[]) {
 	}
 
 	encoding_impl_destroy(encoder);
-
-	FILE* state_file = fopen(NEXT_STATE_FILE, "wb");
-	state = wbx_impl_save_state(impl->wbx, &state_len);
-	fwrite(state, 1, state_len, state_file);
-	fclose(state_file);
-	free(state);
 
 	wbx_impl_exit(impl->wbx);
 	gpgx_impl_destroy(&impl->core);

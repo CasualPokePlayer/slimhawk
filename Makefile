@@ -14,6 +14,7 @@ TARGET := slimhawk
 SRCS := \
 	$(ROOT_DIR)/common/alloc.c \
 	$(ROOT_DIR)/common/file.c \
+	$(ROOT_DIR)/common/stub.c \
 	$(ROOT_DIR)/core/core.c \
 	$(ROOT_DIR)/disc/disc_impl.c \
 	$(ROOT_DIR)/gpgx/gpgx_api.c \
