@@ -1,6 +1,12 @@
 #ifndef _WBX_IMPL_H_
 #define _WBX_IMPL_H_
 
+#ifdef _MSVC_VER
+#error MSVC cannot use WBX_CALL, go get GCC or Clang
+#else
+#define WBX_CALL __attribute__((sysv_abi))
+#endif
+
 #include "wbx_api.h"
 
 struct wbx_impl_t;

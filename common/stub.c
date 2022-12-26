@@ -2,13 +2,13 @@
 #error This file can only be compiled under x86-64
 #endif
 
-#ifndef __linux__
-#error This file can only be compiled on Linux
-#endif
-
+#ifdef _WIN32
+#include <windows.h>
+#else
 #define _GNU_SOURCE
 #include <sys/mman.h>
 #undef _GNU_SOURCE
+#endif
 
 #include "fatal_error.h"
 #include "stub.h"
@@ -20,8 +20,13 @@ void* stub_create(void* target, void* userdata, uint32_t argc) {
 		FATAL_ERROR("Too many args! (got %d, expected at most 5)", argc);
 	}
 
-	void* stub = mmap(NULL, STUB_SIZE, PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+#ifdef _WIN32
+	void* stub = VirtualAlloc(NULL, STUB_SIZE, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+	if (!stub) {
+#else
+	void* stub = mmap(NULL, STUB_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
 	if (stub == MAP_FAILED) {
+#endif
 		FATAL_ERROR("Failed to map stub");
 	}
 
@@ -65,7 +70,12 @@ void* stub_create(void* target, void* userdata, uint32_t argc) {
 	// ret
 	*opcodes++ = 0xC3;
 
-	if (mprotect(stub, STUB_SIZE, PROT_EXEC) == -1) {
+#ifdef _WIN32
+	uint32_t old_protect;
+	if (!VirtualProtect(stub, STUB_SIZE, PAGE_EXECUTE_READ, &old_protect)) {
+#else
+	if (mprotect(stub, STUB_SIZE, PROT_READ | PROT_EXEC) == -1) {
+#endif
 		FATAL_ERROR("Failed to mark stub as executable");
 	}
 
@@ -73,7 +83,11 @@ void* stub_create(void* target, void* userdata, uint32_t argc) {
 }
 
 void stub_destroy(void* stub) {
+#ifdef _WIN32
+	if (!VirtualFree(stub, 0, MEM_RELEASE)) {
+#else
 	if (munmap(stub, STUB_SIZE) == -1) {
+#endif
 		FATAL_ERROR("Failed to unmap stub");
 	}
 }

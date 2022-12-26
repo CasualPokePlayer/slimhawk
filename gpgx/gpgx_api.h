@@ -3,11 +3,11 @@
 
 #include "wbx_impl.h"
 
-typedef int32_t (*gpgx_api_load_archive_cb_t)(const char* filename, void* buffer, uint32_t max_size);
-typedef void (*gpgx_api_input_cb_t)(void);
-typedef void (*gpgx_api_mem_cb_t)(uint32_t addr);
-typedef void (*gpgx_api_cd_cb_t)(int32_t addr, int32_t addr_type, int32_t flags);
-typedef void (*gpgx_api_cd_read_cb_t)(int32_t lba, void* dst, bool audio);
+typedef WBX_CALL int32_t (*gpgx_api_load_archive_cb_t)(const char* filename, void* buffer, uint32_t max_size);
+typedef WBX_CALL void (*gpgx_api_input_cb_t)(void);
+typedef WBX_CALL void (*gpgx_api_mem_cb_t)(uint32_t addr);
+typedef WBX_CALL void (*gpgx_api_cd_cb_t)(int32_t addr, int32_t addr_type, int32_t flags);
+typedef WBX_CALL void (*gpgx_api_cd_read_cb_t)(int32_t lba, void* dst, bool audio);
 
 typedef struct {
 	uint32_t backdrop_color;
@@ -66,34 +66,34 @@ typedef struct {
 } gpgx_api_register_info_t;
 
 typedef struct {
-	void (*gpgx_get_video)(int32_t* w, int32_t* h, int32_t* pitch, uint32_t** buffer);
-	void (*gpgx_get_audio)(int32_t* n, int16_t** buffer);
-	void (*gpgx_advance)(void);
-	bool (*gpgx_init)(const char* rom_extension, gpgx_api_load_archive_cb_t load_archive_cb, gpgx_api_init_settings_t* settings);
-	void (*gpgx_get_fps)(int32_t* num, int32_t* den);
-	bool (*gpgx_get_control)(gpgx_api_input_data_t* dst, int32_t bytes);
-	bool (*gpgx_put_control)(gpgx_api_input_data_t* src, int32_t bytes);
-	void* (*gpgx_get_sram)(int32_t* size);
-	void (*gpgx_put_sram)(uint8_t* data, int32_t size);
-	void (*gpgx_clear_sram)(void);
-	const char* (*gpgx_get_memdom)(int32_t which, uint8_t** area, int32_t* size);
-	void (*gpgx_reset)(bool hard);
-	void (*gpgx_set_input_callback)(gpgx_api_input_cb_t cb);
-	void (*gpgx_set_mem_callback)(gpgx_api_mem_cb_t read, gpgx_api_mem_cb_t write, gpgx_api_mem_cb_t exec);
-	void (*gpgx_set_cd_callback)(gpgx_api_cd_cb_t cd);
-	void (*gpgx_set_cdd_callback)(gpgx_api_cd_read_cb_t cdd_cb);
-	void (*gpgx_swap_disc)(gpgx_api_cd_data_t* toc);
-	void (*gpgx_get_vdp_view)(gpgx_api_vdp_view_t* view);
-	void (*gpgx_poke_vram)(int32_t addr, uint8_t value);
-	void (*gpgx_flush_vram)(void);
-	void (*gpgx_invalidate_pattern_cache)(void);
-	int32_t (*gpgx_getmaxnumregs)(void);
-	int32_t (*gpgx_getregs)(gpgx_api_register_info_t* regs);
-	void (*gpgx_set_draw_mask)(int32_t mask);
-	void (*gpgx_write_m68k_bus)(uint32_t addr, uint8_t data);
-	void (*gpgx_write_s68k_bus)(uint32_t addr, uint8_t data);
-	uint8_t (*gpgx_peek_m68k_bus)(uint32_t addr);
-	uint8_t (*gpgx_peek_s68k_bus)(uint32_t addr);
+	WBX_CALL void (*gpgx_get_video)(int32_t* w, int32_t* h, int32_t* pitch, uint32_t** buffer);
+	WBX_CALL void (*gpgx_get_audio)(int32_t* n, int16_t** buffer);
+	WBX_CALL void (*gpgx_advance)(void);
+	WBX_CALL bool (*gpgx_init)(const char* rom_extension, gpgx_api_load_archive_cb_t load_archive_cb, gpgx_api_init_settings_t* settings);
+	WBX_CALL void (*gpgx_get_fps)(int32_t* num, int32_t* den);
+	WBX_CALL bool (*gpgx_get_control)(gpgx_api_input_data_t* dst, int32_t bytes);
+	WBX_CALL bool (*gpgx_put_control)(gpgx_api_input_data_t* src, int32_t bytes);
+	WBX_CALL void* (*gpgx_get_sram)(int32_t* size);
+	WBX_CALL void (*gpgx_put_sram)(uint8_t* data, int32_t size);
+	WBX_CALL void (*gpgx_clear_sram)(void);
+	WBX_CALL const char* (*gpgx_get_memdom)(int32_t which, uint8_t** area, int32_t* size);
+	WBX_CALL void (*gpgx_reset)(bool hard);
+	WBX_CALL void (*gpgx_set_input_callback)(gpgx_api_input_cb_t cb);
+	WBX_CALL void (*gpgx_set_mem_callback)(gpgx_api_mem_cb_t read, gpgx_api_mem_cb_t write, gpgx_api_mem_cb_t exec);
+	WBX_CALL void (*gpgx_set_cd_callback)(gpgx_api_cd_cb_t cd);
+	WBX_CALL void (*gpgx_set_cdd_callback)(gpgx_api_cd_read_cb_t cdd_cb);
+	WBX_CALL void (*gpgx_swap_disc)(gpgx_api_cd_data_t* toc);
+	WBX_CALL void (*gpgx_get_vdp_view)(gpgx_api_vdp_view_t* view);
+	WBX_CALL void (*gpgx_poke_vram)(int32_t addr, uint8_t value);
+	WBX_CALL void (*gpgx_flush_vram)(void);
+	WBX_CALL void (*gpgx_invalidate_pattern_cache)(void);
+	WBX_CALL int32_t (*gpgx_getmaxnumregs)(void);
+	WBX_CALL int32_t (*gpgx_getregs)(gpgx_api_register_info_t* regs);
+	WBX_CALL void (*gpgx_set_draw_mask)(int32_t mask);
+	WBX_CALL void (*gpgx_write_m68k_bus)(uint32_t addr, uint8_t data);
+	WBX_CALL void (*gpgx_write_s68k_bus)(uint32_t addr, uint8_t data);
+	WBX_CALL uint8_t (*gpgx_peek_m68k_bus)(uint32_t addr);
+	WBX_CALL uint8_t (*gpgx_peek_s68k_bus)(uint32_t addr);
 } gpgx_api_t;
 
 gpgx_api_t* gpgx_api_create(wbx_impl_t* wbx);

@@ -22,7 +22,7 @@ typedef struct {
 	uint32_t audio_buffer_size;
 } gpgx_impl_t;
 
-static int32_t gpgx_impl_load_archive_callback(const char* filename, void* buffer, uint32_t max_size, void* userdata) {
+WBX_CALL static int32_t gpgx_impl_load_archive_callback(const char* filename, void* buffer, uint32_t max_size, void* userdata) {
 	if (!buffer) {
 		fprintf(stderr, "Could not satify firmware request for %s as buffer is NULL\n", filename);
 		return 0;
@@ -83,7 +83,7 @@ static int32_t gpgx_impl_load_archive_callback(const char* filename, void* buffe
 	return src.length;
 }
 
-static void gpgx_impl_cd_read_callback(int32_t lba, void* dst, bool audio, void* userdata) {
+WBX_CALL static void gpgx_impl_cd_read_callback(int32_t lba, void* dst, bool audio, void* userdata) {
 	gpgx_impl_t* impl = (gpgx_impl_t*)userdata;
 	if (audio) {
 		if (lba < impl->toc->end) {
